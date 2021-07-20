@@ -10,7 +10,7 @@ let hap: HAP;
  */
 export = (api: API) => {
   hap = api.hap;
-  api.registerAccessory("Thermostat", Thermostat);
+  api.registerAccessory('Thermostat', Thermostat);
 };
 
 class Thermostat implements AccessoryPlugin {
@@ -21,18 +21,18 @@ class Thermostat implements AccessoryPlugin {
   private readonly thermostatService: Service;
 
   private client: redis.RedisClient;
-  private sensorID: string = '1';
-  private threshold: number = 1.5;
+  private sensorID;
+  private threshold = 1.5;
 
   private state = {
     CurrentHeatingCoolingState: 0,
     TargetHeatingCoolingState: 0,
     CurrentTemperature: 25,
     TargetTemperature: 25,
-    TemperatureDisplayUnits: hap.Characteristic.TemperatureDisplayUnits.CELSIUS
+    TemperatureDisplayUnits: hap.Characteristic.TemperatureDisplayUnits.CELSIUS,
   };
 
-  constructor(log: Logging, config: AccessoryConfig, api: API) {
+  constructor(log: Logging, config: AccessoryConfig) {
     this.log = log;
     this.name = config.name;
 
@@ -96,7 +96,6 @@ class Thermostat implements AccessoryPlugin {
 
       // push the new value to HomeKit
       this.thermostatService.updateCharacteristic(hap.Characteristic.CurrentTemperature, this.state.CurrentTemperature);
-      
     }, 10000);
   }
 
@@ -116,7 +115,7 @@ class Thermostat implements AccessoryPlugin {
   /**
    * Handle requests to get the current value of the "Current Heating Cooling State" characteristic
    */
-   handleCurrentHeatingCoolingStateGet() {
+  handleCurrentHeatingCoolingStateGet() {
     this.log.debug('Triggered GET CurrentHeatingCoolingState');
 
     return this.state.CurrentHeatingCoolingState;
@@ -154,7 +153,7 @@ class Thermostat implements AccessoryPlugin {
   /**
    * Handle on change requests of the "Current Temperature" characteristic
    */
-   handleCurrentTemperatureChange(change: CharacteristicChange) {
+  handleCurrentTemperatureChange(change: CharacteristicChange) {
     this.log.debug('Triggered CHANGE CurrentTemperature:', change.newValue);
 
     switch (this.state.TargetHeatingCoolingState) {
@@ -188,7 +187,7 @@ class Thermostat implements AccessoryPlugin {
         break;
       // Auto
       default:
-        this.log.debug("'Auto' mode is not supported for this device.");
+        this.log.debug('\'Auto\' mode is not supported for this device.');
         break;
     }
   }
