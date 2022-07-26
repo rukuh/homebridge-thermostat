@@ -1,7 +1,9 @@
 import ds18b20 from 'ds18b20';
 import { AccessoryConfig, AccessoryPlugin, API, CharacteristicChange, CharacteristicValue, HAP, Logging, Service } from 'homebridge';
 import redis from 'redis';
-import gpio from 'rpi-gpio';
+const gpiop = require('rpi-gpio').promise;
+import { promisify } from 'util';
+const ds18b20p = promisify(ds18b20.sensors);
 
 let hap: HAP;
 
@@ -72,10 +74,10 @@ class Thermostat implements AccessoryPlugin {
       .onSet(this.handleTemperatureDisplayUnitsSet.bind(this));
 
     // set pin reference mode
-    gpio.setMode(gpio.MODE_BCM);
+    gpiop.setMode(gpiop.MODE_BCM);
 
     // setup a channel for use as an output
-    gpio.setup(27, gpio.DIR_OUT);
+    gpiop.setup(27, gpiop.DIR_OUT);
 
     // get all connected sensor IDs as array
     ds18b20.sensors((err, ids) => this.sensorID = ids[0]);
@@ -153,37 +155,31 @@ class Thermostat implements AccessoryPlugin {
   /**
    * Handle on change requests of the "Current Temperature" characteristic
    */
-  handleCurrentTemperatureChange(change: CharacteristicChange) {
+  async handleCurrentTemperatureChange(change: CharacteristicChange) {
     this.log.debug('Triggered CHANGE CurrentTemperature:', change.newValue);
 
     switch (this.state.TargetHeatingCoolingState) {
       // Off
       case 0:
-        gpio.input(27, (value) => {
-          if (value) {
-            gpio.output(27, false);
-          }
-        });
+        if (await gpiop.input(27)) {
+          gpiop.output(27, false);
+        }
         break;
       // Heat
       case 1:
-        gpio.input(27, (value) => {
-          if (value && this.state.CurrentTemperature > this.state.TargetTemperature) {
-            gpio.output(27, false);
-          } else if (this.state.TargetTemperature - this.state.CurrentTemperature >= this.threshold * ( 5 / 9 )) {
-            gpio.output(27, true);
-          }
-        });
+        if (await gpiop.input(27) && this.state.CurrentTemperature > this.state.TargetTemperature) {
+          gpiop.output(27, false);
+        } else if (this.state.TargetTemperature - this.state.CurrentTemperature >= this.threshold * ( 5 / 9 )) {
+          gpiop.output(27, true);
+        }
         break;
       // Cool
       case 2:
-        gpio.input(27, (value) => {
-          if (value && this.state.CurrentTemperature < this.state.TargetTemperature) {
-            gpio.output(27, false);
-          } else if (this.state.CurrentTemperature - this.state.TargetTemperature >= this.threshold * ( 5 / 9)) {
-            gpio.output(27, true);
-          }
-        });
+        if (await gpiop.input(27) && this.state.CurrentTemperature < this.state.TargetTemperature) {
+          gpiop.output(27, false);
+        } else if (this.state.CurrentTemperature - this.state.TargetTemperature >= this.threshold * ( 5 / 9)) {
+          gpiop.output(27, true);
+        }
         break;
       // Auto
       default:
