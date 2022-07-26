@@ -1,8 +1,8 @@
 import ds18b20 from 'ds18b20';
 import { AccessoryConfig, AccessoryPlugin, API, CharacteristicChange, CharacteristicValue, HAP, Logging, Service } from 'homebridge';
 import redis from 'redis';
-const gpiop = require('rpi-gpio').promise;
 import { promisify } from 'util';
+const gpiop = require('rpi-gpio').promise;
 const ds18b20p = promisify(ds18b20.sensors);
 
 let hap: HAP;
@@ -73,11 +73,8 @@ class Thermostat implements AccessoryPlugin {
       .onGet(this.handleTemperatureDisplayUnitsGet.bind(this))
       .onSet(this.handleTemperatureDisplayUnitsSet.bind(this));
 
-    // set pin reference mode
-    gpiop.setMode(gpiop.MODE_BCM);
-
     // setup a channel for use as an output
-    gpiop.setup(27, gpiop.DIR_OUT);
+    gpiop.setup(13, gpiop.DIR_OUT);
 
     // get all connected sensor IDs as array
     ds18b20.sensors((err, ids) => this.sensorID = ids[0]);
@@ -161,24 +158,24 @@ class Thermostat implements AccessoryPlugin {
     switch (this.state.TargetHeatingCoolingState) {
       // Off
       case 0:
-        if (await gpiop.input(27)) {
-          gpiop.output(27, false);
+        if (await gpiop.read(13)) {
+          gpiop.write(13, false);
         }
         break;
       // Heat
       case 1:
-        if (await gpiop.input(27) && this.state.CurrentTemperature > this.state.TargetTemperature) {
-          gpiop.output(27, false);
+        if (await gpiop.read(13) && this.state.CurrentTemperature > this.state.TargetTemperature) {
+          gpiop.write(13, false);
         } else if (this.state.TargetTemperature - this.state.CurrentTemperature >= this.threshold * ( 5 / 9 )) {
-          gpiop.output(27, true);
+          gpiop.write(13, true);
         }
         break;
       // Cool
       case 2:
-        if (await gpiop.input(27) && this.state.CurrentTemperature < this.state.TargetTemperature) {
-          gpiop.output(27, false);
+        if (await gpiop.read(13) && this.state.CurrentTemperature < this.state.TargetTemperature) {
+          gpiop.write(13, false);
         } else if (this.state.CurrentTemperature - this.state.TargetTemperature >= this.threshold * ( 5 / 9)) {
-          gpiop.output(27, true);
+          gpiop.write(13, true);
         }
         break;
       // Auto
