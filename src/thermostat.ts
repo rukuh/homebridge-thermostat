@@ -15,8 +15,12 @@ let Characteristic: typeof CharacteristicClass, Service: typeof ServiceClass;
 export = (homebridge: Types.API) => {
   Characteristic = homebridge.hap.Characteristic;
   Service = homebridge.hap.Service;
-  homebridge.registerAccessory('hoembridge-web-thermostat', 'Thermostat', Thermostat);
+  homebridge.registerAccessory('homebridge-thermostat', 'Thermostat', Thermostat);
 };
+
+interface State {
+  [key: string]: Types.CharacteristicValue;
+}
 
 class Thermostat implements Types.AccessoryPlugin {
   private readonly log: Types.Logging;
@@ -26,7 +30,7 @@ class Thermostat implements Types.AccessoryPlugin {
 
   private client: redis.RedisClient;
   private sensorID: string | undefined;
-  private state: { [key: string]: Types.CharacteristicValue; }
+  private state: State;
   private threshold: number = 1.5;
 
   constructor(log: Types.Logging, config: Types.AccessoryConfig) {
@@ -39,8 +43,15 @@ class Thermostat implements Types.AccessoryPlugin {
       TargetHeatingCoolingState: 0,
       CurrentTemperature: 25,
       TargetTemperature: 25,
-      TemperatureDisplayUnits: Characteristic.TemperatureDisplayUnits.FAHRENHEIT,
+      TemperatureDisplayUnits: Characteristic.TemperatureDisplayUnits.FAHRENHEIT
     };
+
+    this.client.get('State', this.updateValues.bind(this));
+
+    // convert threshold to TemperatureDisplayUnits units
+    if (this.state.TemperatureDisplayUnits === Characteristic.TemperatureDisplayUnits.CELSIUS) {
+      this.threshold *= (5 / 9);
+    }
 
     // set accessory information
     this.informationService = new Service.AccessoryInformation()
@@ -57,20 +68,24 @@ class Thermostat implements Types.AccessoryPlugin {
     // see https://developers.homebridge.io/#/service/Lightbulb
 
     // create handlers for required characteristics
+    this.thermostatService.getCharacteristic(Characteristic.CurrentHeatingCoolingState)
+      .onGet(this.handleCurrentHeatingCoolingStateGet.bind(this));
+
     this.thermostatService.getCharacteristic(Characteristic.TargetHeatingCoolingState)
+      .onGet(this.handleTargetHeatingCoolingStateGet.bind(this))
       .onSet(this.handleTargetHeatingCoolingStateSet.bind(this));
 
     this.thermostatService.getCharacteristic(Characteristic.CurrentTemperature)
       .on(Types.CharacteristicEventTypes.CHANGE, this.handleCurrentTemperatureChange.bind(this))  
       .onGet(this.handleCurrentTemperatureGet.bind(this));
-      
 
     this.thermostatService.getCharacteristic(Characteristic.TargetTemperature)
       .onGet(this.handleTargetTemperatureGet.bind(this))
       .onSet(this.handleTargetTemperatureSet.bind(this));
 
     this.thermostatService.getCharacteristic(Characteristic.TemperatureDisplayUnits)
-      .updateValue(this.state.TemperatureDisplayUnits);
+      .onGet(this.handleTemperatureDisplayUnitsGet.bind(this))
+      .onSet(this.handleTemperatureDisplayUnitsSet.bind(this));
 
     // setup a channel for use as an output
     gpiop.setup(13, gpiop.DIR_OUT);
@@ -90,7 +105,7 @@ class Thermostat implements Types.AccessoryPlugin {
     setInterval(() => {
       this.log.debug('State', this.state);
 
-      this.state.CurrentTemperature = ds18b20.temperatureSync(this.sensorID);
+      this.setState({ CurrentTemperature: ds18b20.temperatureSync(this.sensorID) });
 
       // push the new value to HomeKit
       this.thermostatService.updateCharacteristic(Characteristic.CurrentTemperature, this.state.CurrentTemperature);
@@ -98,16 +113,28 @@ class Thermostat implements Types.AccessoryPlugin {
   }
 
   getServices(): Types.Service[] {
-    this.client.get('State', (err, state) => {
-      if (state) {
-        this.state = JSON.parse(state);
-      }
-    });
-
     return [
       this.informationService,
       this.thermostatService,
     ];
+  }
+
+  /**
+   * Handle requests to get the current value of the "Current Heating Cooling State" characteristic
+   */
+  handleCurrentHeatingCoolingStateGet() {
+    this.log.debug(this.handleCurrentHeatingCoolingStateGet.name);
+
+    return this.state.CurrentHeatingCoolingState;
+  }
+
+  /**
+   * Handle requests to get the current value of the "Target Heating Cooling State" characteristic
+   */
+  handleTargetHeatingCoolingStateGet() {
+    this.log.debug(this.handleTargetHeatingCoolingStateGet.name);
+
+    return this.state.TargetHeatingCoolingState;
   }
 
   /**
@@ -116,10 +143,12 @@ class Thermostat implements Types.AccessoryPlugin {
   handleTargetHeatingCoolingStateSet(value: Types.CharacteristicValue) {
     this.log.debug(this.handleTargetHeatingCoolingStateSet.name, value);
     
-    this.state.CurrentHeatingCoolingState = value;
-    this.state.TargetHeatingCoolingState = value;
-    this.client.set('State', JSON.stringify(this.state));
-    this.thermostatService.getCharacteristic(Characteristic.CurrentHeatingCoolingState).updateValue(value);
+    this.setState({
+      CurrentHeatingCoolingState: value,
+      TargetHeatingCoolingState: value
+    });
+    
+    // this.thermostatService.getCharacteristic(Characteristic.CurrentHeatingCoolingState).updateValue(value);
   }
 
   /**
@@ -137,23 +166,25 @@ class Thermostat implements Types.AccessoryPlugin {
   async handleCurrentTemperatureChange(change: Types.CharacteristicChange) {
     this.log.debug(this.handleCurrentTemperatureChange.name, change.newValue);
 
+    const gpiop13 = await gpiop.read(13);
+
     switch (this.state.TargetHeatingCoolingState) {
       case 0: // Off
-        if (await gpiop.read(13)) {
+        if (gpiop13) {
           gpiop.write(13, false);
         }
         break;
       case 1: // Heat
-        if (await gpiop.read(13) && this.state.CurrentTemperature > this.state.TargetTemperature) {
+        if (gpiop13 && this.state.CurrentTemperature > this.state.TargetTemperature) {
           gpiop.write(13, false);
-        } else if ((this.state.TargetTemperature as number) - (this.state.CurrentTemperature as number) >= this.threshold * ( 5 / 9 )) {
+        } else if (typeof this.state.TargetTemperature === 'number' && typeof this.state.CurrentTemperature === 'number' && this.state.TargetTemperature - this.state.CurrentTemperature >= this.threshold) {
           gpiop.write(13, true);
         }
         break;
       case 2: // Cool
-        if (await gpiop.read(13) && this.state.CurrentTemperature < this.state.TargetTemperature) {
+        if (gpiop13 && this.state.CurrentTemperature < this.state.TargetTemperature) {
           gpiop.write(13, false);
-        } else if ((this.state.CurrentTemperature as number) - (this.state.TargetTemperature as number) >= this.threshold * ( 5 / 9)) {
+        } else if (typeof this.state.CurrentTemperature === 'number' && typeof this.state.TargetTemperature === 'number' && this.state.CurrentTemperature - this.state.TargetTemperature >= this.threshold) {
           gpiop.write(13, true);
         }
         break;
@@ -178,7 +209,44 @@ class Thermostat implements Types.AccessoryPlugin {
   handleTargetTemperatureSet(value: Types.CharacteristicValue) {
     this.log.debug(this.handleTargetTemperatureSet.name, value);
 
-    this.state.TargetTemperature = value;
+    this.setState({ TargetTemperature: value });
+  }
+
+  /**
+   * Handle requests to get the current value of the "Temperature Display Units" characteristic
+   */
+  handleTemperatureDisplayUnitsGet() {
+    this.log.debug(this.handleTemperatureDisplayUnitsGet.name);
+
+    return this.state.TemperatureDisplayUnits;
+  }
+
+  /**
+   * Handle requests to set the "Temperature Display Units" characteristic
+   */
+  handleTemperatureDisplayUnitsSet(value: Types.CharacteristicValue) {
+    this.log.debug(this.handleTemperatureDisplayUnitsSet.name, value);
+
+     this.setState({ TemperatureDisplayUnits: value }); 
+  }
+
+  setState(state: State) {
+    this.state = {
+      ...this.state,
+      ...state
+    };
+
     this.client.set('State', JSON.stringify(this.state));
+  }
+
+  updateValues(err?: Error, redisState?: string) {
+    this.log.debug('redisState', redisState);
+    if (redisState) {
+      this.state = JSON.parse(redisState);
+      this.thermostatService.updateCharacteristic(Characteristic.CurrentHeatingCoolingState, this.state.CurrentHeatingCoolingState);
+      this.thermostatService.updateCharacteristic(Characteristic.TargetHeatingCoolingState, this.state.TargetHeatingCoolingState);
+      this.thermostatService.updateCharacteristic(Characteristic.TargetTemperature, this.state.TargetTemperature);
+      this.thermostatService.updateCharacteristic(Characteristic.TemperatureDisplayUnits, this.state.TemperatureDisplayUnits);
+    }
   }
 }
