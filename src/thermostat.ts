@@ -5,7 +5,7 @@ import redis from 'redis';
 import { promisify } from 'util';
 const gpiop = require('rpi-gpio').promise;
 const ds18b20p = promisify(ds18b20.sensors);
-const packageJson = require('../package.json')
+const packageJson = require('../package.json');
 
 let Characteristic: typeof CharacteristicClass, Service: typeof ServiceClass;
 
@@ -31,11 +31,11 @@ class Thermostat implements Types.AccessoryPlugin {
   private client: redis.RedisClient;
   private sensorID: string | undefined;
   private state: State;
-  private threshold: number = 1.5;
+  private threshold: number = 1.5 * (5/9); // Alexa not properly displaying temperature units
 
   constructor(log: Types.Logging, config: Types.AccessoryConfig) {
     this.log = log;
-    
+
     this.client = redis.createClient();
 
     this.state = {
@@ -43,14 +43,14 @@ class Thermostat implements Types.AccessoryPlugin {
       TargetHeatingCoolingState: 0,
       CurrentTemperature: 25,
       TargetTemperature: 25,
-      TemperatureDisplayUnits: Characteristic.TemperatureDisplayUnits.FAHRENHEIT
+      TemperatureDisplayUnits: 1,
     };
 
     this.client.get('State', this.updateValues.bind(this));
 
     // convert threshold to TemperatureDisplayUnits units
-    if (this.state.TemperatureDisplayUnits === Characteristic.TemperatureDisplayUnits.CELSIUS) {
-      this.threshold *= (5 / 9);
+    if (this.state.TemperatureDisplayUnits === 0) {
+      this.threshold *= (5/9);
     }
 
     // set accessory information
@@ -76,7 +76,7 @@ class Thermostat implements Types.AccessoryPlugin {
       .onSet(this.handleTargetHeatingCoolingStateSet.bind(this));
 
     this.thermostatService.getCharacteristic(Characteristic.CurrentTemperature)
-      .on(Types.CharacteristicEventTypes.CHANGE, this.handleCurrentTemperatureChange.bind(this))  
+      .on(Types.CharacteristicEventTypes.CHANGE, this.handleCurrentTemperatureChange.bind(this))
       .onGet(this.handleCurrentTemperatureGet.bind(this));
 
     this.thermostatService.getCharacteristic(Characteristic.TargetTemperature)
@@ -142,12 +142,9 @@ class Thermostat implements Types.AccessoryPlugin {
    */
   handleTargetHeatingCoolingStateSet(value: Types.CharacteristicValue) {
     this.log.debug(this.handleTargetHeatingCoolingStateSet.name, value);
-    
-    this.setState({
-      CurrentHeatingCoolingState: value,
-      TargetHeatingCoolingState: value
-    });
-    
+
+    this.setState({ TargetHeatingCoolingState: value });
+
     // this.thermostatService.getCharacteristic(Characteristic.CurrentHeatingCoolingState).updateValue(value);
   }
 
@@ -192,6 +189,8 @@ class Thermostat implements Types.AccessoryPlugin {
         this.log.debug('\'Auto\' mode is not supported for this device.');
         break;
     }
+
+    this.setState({ CurrentHeatingCoolingState: await gpiop.read(13) ? 1 : 0 });
   }
 
   /**
@@ -227,13 +226,13 @@ class Thermostat implements Types.AccessoryPlugin {
   handleTemperatureDisplayUnitsSet(value: Types.CharacteristicValue) {
     this.log.debug(this.handleTemperatureDisplayUnitsSet.name, value);
 
-     this.setState({ TemperatureDisplayUnits: value }); 
+    this.setState({ TemperatureDisplayUnits: value });
   }
 
   setState(state: State) {
     this.state = {
       ...this.state,
-      ...state
+      ...state,
     };
 
     this.client.set('State', JSON.stringify(this.state));
