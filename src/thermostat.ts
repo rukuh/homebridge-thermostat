@@ -3,8 +3,11 @@ import { Characteristic as CharacteristicClass, Service as ServiceClass } from '
 import * as Types from 'homebridge';
 import redis from 'redis';
 import { promisify } from 'util';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const gpiop = require('rpi-gpio').promise;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const ds18b20p = promisify(ds18b20.sensors);
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const packageJson = require('../package.json');
 
 let Characteristic: typeof CharacteristicClass, Service: typeof ServiceClass;
@@ -174,6 +177,7 @@ class Thermostat implements Types.AccessoryPlugin {
       case 1: // Heat
         if (gpiop13 && this.state.CurrentTemperature > this.state.TargetTemperature) {
           gpiop.write(13, false);
+        // eslint-disable-next-line max-len
         } else if (typeof this.state.TargetTemperature === 'number' && typeof this.state.CurrentTemperature === 'number' && this.state.TargetTemperature - this.state.CurrentTemperature >= this.threshold) {
           gpiop.write(13, true);
         }
@@ -181,6 +185,7 @@ class Thermostat implements Types.AccessoryPlugin {
       case 2: // Cool
         if (gpiop13 && this.state.CurrentTemperature < this.state.TargetTemperature) {
           gpiop.write(13, false);
+        // eslint-disable-next-line max-len
         } else if (typeof this.state.CurrentTemperature === 'number' && typeof this.state.TargetTemperature === 'number' && this.state.CurrentTemperature - this.state.TargetTemperature >= this.threshold) {
           gpiop.write(13, true);
         }
