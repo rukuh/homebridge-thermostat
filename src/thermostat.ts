@@ -3,9 +3,9 @@ import { Characteristic as CharacteristicClass, Service as ServiceClass } from '
 import * as Types from 'homebridge';
 import redis from 'redis';
 import { promisify } from 'util';
-const ds18b20p = promisify(ds18b20.sensors);
 const packageJson = require('../package.json');
 const rpio = require('rpio');
+promisify(ds18b20.sensors);
 
 let Characteristic: typeof CharacteristicClass, Service: typeof ServiceClass;
 
@@ -29,6 +29,7 @@ class Thermostat implements Types.AccessoryPlugin {
   private readonly thermostatService: Types.Service;
 
   private client: redis.RedisClient;
+  private pin = parseInt(process.env.PIN || '1');
   private sensorID: string | undefined;
   private state: State;
   private threshold: number = 1.5 * (5/9); // Alexa not properly displaying temperature units
@@ -88,7 +89,8 @@ class Thermostat implements Types.AccessoryPlugin {
       .onSet(this.handleTemperatureDisplayUnitsSet.bind(this));
 
     // setup a channel for use as an output
-    rpio.open(13, rpio.OUTPUT);
+    rpio.open(this.pin, rpio.OUTPUT);
+    this.log.debug(`Pin ${this.pin} is currently ` + (rpio.read(this.pin) ? 'high' : 'low'));
 
     // get all connected sensor IDs as array
     ds18b20.sensors((err, ids) => {
@@ -163,31 +165,31 @@ class Thermostat implements Types.AccessoryPlugin {
   /**
    * Handle on change requests of the "Current Temperature" characteristic
    */
-  async handleCurrentTemperatureChange(change: Types.CharacteristicChange) {
+  handleCurrentTemperatureChange(change: Types.CharacteristicChange) {
     this.log.debug(this.handleCurrentTemperatureChange.name, change.newValue);
 
-    const pin13 = await rpio.read(13);
+    const pin = rpio.read(this.pin);
 
     switch (this.state.TargetHeatingCoolingState) {
       case 0: // Off
-        if (pin13) {
-          rpio.write(13, rpio.LOW);
+        if (pin) {
+          rpio.write(this.pin, rpio.LOW);
         }
         break;
       case 1: // Heat
-        if (pin13 && this.state.CurrentTemperature > this.state.TargetTemperature) {
-          rpio.write(13, rpio.LOW);
+        if (pin && this.state.CurrentTemperature > this.state.TargetTemperature) {
+          rpio.write(this.pin, rpio.LOW);
         // eslint-disable-next-line max-len
         } else if (typeof this.state.TargetTemperature === 'number' && typeof this.state.CurrentTemperature === 'number' && this.state.TargetTemperature - this.state.CurrentTemperature >= this.threshold) {
-          rpio.write(13, rpio.HIGH);
+          rpio.write(this.pin, rpio.HIGH);
         }
         break;
       case 2: // Cool
-        if (pin13 && this.state.CurrentTemperature < this.state.TargetTemperature) {
-          rpio.write(13, rpio.LOW);
+        if (pin && this.state.CurrentTemperature < this.state.TargetTemperature) {
+          rpio.write(this.pin, rpio.LOW);
         // eslint-disable-next-line max-len
         } else if (typeof this.state.CurrentTemperature === 'number' && typeof this.state.TargetTemperature === 'number' && this.state.CurrentTemperature - this.state.TargetTemperature >= this.threshold) {
-          rpio.write(13, rpio.HIGH);
+          rpio.write(this.pin, rpio.HIGH);
         }
         break;
       default: // Auto
@@ -195,7 +197,7 @@ class Thermostat implements Types.AccessoryPlugin {
         break;
     }
 
-    this.setState({ CurrentHeatingCoolingState: await rpio.read(13) ? 1 : 0 });
+    this.setState({ CurrentHeatingCoolingState: rpio.read(this.pin) ? 1 : 0 });
   }
 
   /**
