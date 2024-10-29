@@ -3,12 +3,9 @@ import { Characteristic as CharacteristicClass, Service as ServiceClass } from '
 import * as Types from 'homebridge';
 import redis from 'redis';
 import { promisify } from 'util';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const gpiop = require('rpi-gpio').promise;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const ds18b20p = promisify(ds18b20.sensors);
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const packageJson = require('../package.json');
+const rpio = require('rpio');
 
 let Characteristic: typeof CharacteristicClass, Service: typeof ServiceClass;
 
@@ -91,10 +88,15 @@ class Thermostat implements Types.AccessoryPlugin {
       .onSet(this.handleTemperatureDisplayUnitsSet.bind(this));
 
     // setup a channel for use as an output
-    gpiop.setup(13, gpiop.DIR_OUT);
+    rpio.open(13, rpio.OUTPUT);
 
     // get all connected sensor IDs as array
-    ds18b20.sensors((err, ids) => this.sensorID = ids[0]);
+    ds18b20.sensors((err, ids) => {
+      if (err) {
+        this.log.error(err);
+      }
+      this.sensorID = ids[0];
+    });
 
     /**
      * Updating characteristics values asynchronously.
@@ -107,9 +109,7 @@ class Thermostat implements Types.AccessoryPlugin {
      */
     setInterval(() => {
       this.log.debug('State', this.state);
-
       this.setState({ CurrentTemperature: ds18b20.temperatureSync(this.sensorID) });
-
       // push the new value to HomeKit
       this.thermostatService.updateCharacteristic(Characteristic.CurrentTemperature, this.state.CurrentTemperature);
     }, 10000);
@@ -166,28 +166,28 @@ class Thermostat implements Types.AccessoryPlugin {
   async handleCurrentTemperatureChange(change: Types.CharacteristicChange) {
     this.log.debug(this.handleCurrentTemperatureChange.name, change.newValue);
 
-    const gpiop13 = await gpiop.read(13);
+    const pin13 = await rpio.read(13);
 
     switch (this.state.TargetHeatingCoolingState) {
       case 0: // Off
-        if (gpiop13) {
-          gpiop.write(13, false);
+        if (pin13) {
+          rpio.write(13, rpio.LOW);
         }
         break;
       case 1: // Heat
-        if (gpiop13 && this.state.CurrentTemperature > this.state.TargetTemperature) {
-          gpiop.write(13, false);
+        if (pin13 && this.state.CurrentTemperature > this.state.TargetTemperature) {
+          rpio.write(13, rpio.LOW);
         // eslint-disable-next-line max-len
         } else if (typeof this.state.TargetTemperature === 'number' && typeof this.state.CurrentTemperature === 'number' && this.state.TargetTemperature - this.state.CurrentTemperature >= this.threshold) {
-          gpiop.write(13, true);
+          rpio.write(13, rpio.HIGH);
         }
         break;
       case 2: // Cool
-        if (gpiop13 && this.state.CurrentTemperature < this.state.TargetTemperature) {
-          gpiop.write(13, false);
+        if (pin13 && this.state.CurrentTemperature < this.state.TargetTemperature) {
+          rpio.write(13, rpio.LOW);
         // eslint-disable-next-line max-len
         } else if (typeof this.state.CurrentTemperature === 'number' && typeof this.state.TargetTemperature === 'number' && this.state.CurrentTemperature - this.state.TargetTemperature >= this.threshold) {
-          gpiop.write(13, true);
+          rpio.write(13, rpio.HIGH);
         }
         break;
       default: // Auto
@@ -195,7 +195,7 @@ class Thermostat implements Types.AccessoryPlugin {
         break;
     }
 
-    this.setState({ CurrentHeatingCoolingState: await gpiop.read(13) ? 1 : 0 });
+    this.setState({ CurrentHeatingCoolingState: await rpio.read(13) ? 1 : 0 });
   }
 
   /**
@@ -240,7 +240,11 @@ class Thermostat implements Types.AccessoryPlugin {
       ...state,
     };
 
-    this.client.set('State', JSON.stringify(this.state));
+    try {
+      this.client.set('State', JSON.stringify(this.state));
+    } catch(e) {
+      this.log.error('Redis write error', e);
+    }
   }
 
   updateValues(err?: Error, redisState?: string) {
