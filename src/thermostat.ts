@@ -1,7 +1,7 @@
 import ds18b20 from 'ds18b20';
 import { Characteristic as CharacteristicClass, Service as ServiceClass } from 'hap-nodejs';
 import * as Types from 'homebridge';
-import moment from 'moment';
+import moment, { Moment } from 'moment';
 import redis from 'redis';
 import { promisify } from 'util';
 const packageJson = require('../package.json');
@@ -30,6 +30,7 @@ class Thermostat implements Types.AccessoryPlugin {
   private readonly thermostatService: Types.Service;
 
   private client: redis.RedisClient;
+  private lastOff: Moment = moment('0000-01-01', 'YYYY-MM-DD');
   private pin = parseInt(process.env.PIN || '1');
   private rpio: any;
   private sensorID: string | undefined;
@@ -42,11 +43,10 @@ class Thermostat implements Types.AccessoryPlugin {
 
     this.state = {
       CurrentHeatingCoolingState: 0,
-      TargetHeatingCoolingState: 0,
       CurrentTemperature: 25,
+      TargetHeatingCoolingState: 0,
       TargetTemperature: 25,
       TemperatureDisplayUnits: 1,
-      LastOff: moment('0000-01-01', 'YYYY-MM-DD').toString(),
     };
 
     this.client.get('State', this.updateValues.bind(this));
@@ -107,7 +107,7 @@ class Thermostat implements Types.AccessoryPlugin {
      *
      */
     setInterval(() => {
-      this.log.debug('State', this.state);
+      this.log.debug('State', { ...this.state, lastOff: this.lastOff.toString() });
       this.setState({ CurrentTemperature: ds18b20.temperatureSync(this.sensorID) });
       // push the new value to HomeKit
       this.thermostatService.updateCharacteristic(Characteristic.CurrentTemperature, this.state.CurrentTemperature);
@@ -171,25 +171,25 @@ class Thermostat implements Types.AccessoryPlugin {
       case 0: // Off
         if (pin) {
           rpio.write(this.pin, rpio.LOW);
-          this.state.LastOff = moment().toString();
+          this.lastOff = moment();
         }
         break;
-      case 1: // Heat
+      case 1: // Heating
         if (typeof this.state.TargetTemperature === 'number' && typeof this.state.CurrentTemperature === 'number') {
-          if (pin && (this.state.CurrentTemperature - this.state.TargetTemperature) >= 3) {
+          if (pin && (this.state.CurrentTemperature - this.state.TargetTemperature) >= (3 * 5/9)) {
             rpio.write(this.pin, rpio.LOW);
-            this.state.LastOff = moment().toString();
-          } else if (this.state.TargetTemperature - this.state.CurrentTemperature >= 1 && this.isMoreThanFourMinutesAgo()) {
+            this.lastOff = moment();
+          } else if (this.state.TargetTemperature - this.state.CurrentTemperature >= (1 * 5/9) && !this.compressorDelay()) {
             rpio.write(this.pin, rpio.HIGH);
           }
         }
         break;
-      case 2: // Cool
+      case 2: // Cooling
         if (typeof this.state.TargetTemperature === 'number' && typeof this.state.CurrentTemperature === 'number') {
-          if (pin && this.state.TargetTemperature - this.state.CurrentTemperature >= 2) {
+          if (pin && this.state.TargetTemperature - this.state.CurrentTemperature >= (2 * 5/9)) {
             rpio.write(this.pin, rpio.LOW);
-            this.state.LastOff = moment().toString();
-          } else if (this.state.CurrentTemperature - this.state.TargetTemperature >= 1 && this.isMoreThanFourMinutesAgo()) {
+            this.lastOff = moment();
+          } else if (this.state.CurrentTemperature - this.state.TargetTemperature >= (1 * 5/9) && !this.compressorDelay()) {
             rpio.write(this.pin, rpio.HIGH);
           }
         }
@@ -238,9 +238,9 @@ class Thermostat implements Types.AccessoryPlugin {
     this.setState({ TemperatureDisplayUnits: value });
   }
 
-  isMoreThanFourMinutesAgo() {
+  compressorDelay() {
     const fourMinutesAgo = moment().subtract(4, 'minutes');
-    return moment(typeof this.state.LastOff === 'string' && this.state.LastOff || undefined).isSameOrBefore(fourMinutesAgo);
+    return this.lastOff.isAfter(fourMinutesAgo);
   }
 
   setState(state: State) {
