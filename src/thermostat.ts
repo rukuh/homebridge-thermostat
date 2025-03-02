@@ -1,6 +1,7 @@
 import ds18b20 from 'ds18b20';
 import { Characteristic as CharacteristicClass, Service as ServiceClass } from 'hap-nodejs';
 import * as Types from 'homebridge';
+import moment from 'moment';
 import redis from 'redis';
 import { promisify } from 'util';
 const packageJson = require('../package.json');
@@ -30,9 +31,9 @@ class Thermostat implements Types.AccessoryPlugin {
 
   private client: redis.RedisClient;
   private pin = parseInt(process.env.PIN || '1');
+  private rpio: any;
   private sensorID: string | undefined;
   private state: State;
-  private threshold: number = 1.5 * (5/9); // Alexa not properly displaying temperature units
 
   constructor(log: Types.Logging, config: Types.AccessoryConfig) {
     this.log = log;
@@ -45,14 +46,10 @@ class Thermostat implements Types.AccessoryPlugin {
       CurrentTemperature: 25,
       TargetTemperature: 25,
       TemperatureDisplayUnits: 1,
+      LastOff: moment('0000-01-01', 'YYYY-MM-DD').toString(),
     };
 
     this.client.get('State', this.updateValues.bind(this));
-
-    // convert threshold to TemperatureDisplayUnits units
-    if (this.state.TemperatureDisplayUnits === 0) {
-      this.threshold *= (5/9);
-    }
 
     // set accessory information
     this.informationService = new Service.AccessoryInformation()
@@ -174,22 +171,27 @@ class Thermostat implements Types.AccessoryPlugin {
       case 0: // Off
         if (pin) {
           rpio.write(this.pin, rpio.LOW);
+          this.state.LastOff = moment().toString();
         }
         break;
       case 1: // Heat
-        if (pin && this.state.CurrentTemperature > this.state.TargetTemperature) {
-          rpio.write(this.pin, rpio.LOW);
-        // eslint-disable-next-line max-len
-        } else if (typeof this.state.TargetTemperature === 'number' && typeof this.state.CurrentTemperature === 'number' && this.state.TargetTemperature - this.state.CurrentTemperature >= this.threshold) {
-          rpio.write(this.pin, rpio.HIGH);
+        if (typeof this.state.TargetTemperature === 'number' && typeof this.state.CurrentTemperature === 'number') {
+          if (pin && (this.state.CurrentTemperature - this.state.TargetTemperature) >= 3) {
+            rpio.write(this.pin, rpio.LOW);
+            this.state.LastOff = moment().toString();
+          } else if (this.state.TargetTemperature - this.state.CurrentTemperature >= 1 && this.isMoreThanFourMinutesAgo()) {
+            rpio.write(this.pin, rpio.HIGH);
+          }
         }
         break;
       case 2: // Cool
-        if (pin && this.state.CurrentTemperature < this.state.TargetTemperature) {
-          rpio.write(this.pin, rpio.LOW);
-        // eslint-disable-next-line max-len
-        } else if (typeof this.state.CurrentTemperature === 'number' && typeof this.state.TargetTemperature === 'number' && this.state.CurrentTemperature - this.state.TargetTemperature >= this.threshold) {
-          rpio.write(this.pin, rpio.HIGH);
+        if (typeof this.state.TargetTemperature === 'number' && typeof this.state.CurrentTemperature === 'number') {
+          if (pin && this.state.TargetTemperature - this.state.CurrentTemperature >= 2) {
+            rpio.write(this.pin, rpio.LOW);
+            this.state.LastOff = moment().toString();
+          } else if (this.state.CurrentTemperature - this.state.TargetTemperature >= 1 && this.isMoreThanFourMinutesAgo()) {
+            rpio.write(this.pin, rpio.HIGH);
+          }
         }
         break;
       default: // Auto
@@ -234,6 +236,11 @@ class Thermostat implements Types.AccessoryPlugin {
     this.log.debug(this.handleTemperatureDisplayUnitsSet.name, value);
 
     this.setState({ TemperatureDisplayUnits: value });
+  }
+
+  isMoreThanFourMinutesAgo() {
+    const fourMinutesAgo = moment().subtract(4, 'minutes');
+    return moment(typeof this.state.LastOff === 'string' && this.state.LastOff || undefined).isSameOrBefore(fourMinutesAgo);
   }
 
   setState(state: State) {
