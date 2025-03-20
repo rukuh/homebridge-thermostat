@@ -1,4 +1,5 @@
 {
+  "author": "Luke Hyun <luke.hyun@gmail.com> (https://github.com/rukuh/)",
   "private": true,
   "displayName": "Thermostat",
   "name": "homebridge-thermostat",
@@ -13,25 +14,25 @@
     "url": "https://github.com/rukuh/homebridge-thermostat/issues"
   },
   "engines": {
-    "node": ">=10.17.0",
-    "homebridge": ">=1.3.0"
+    "node": "^18.20.4",
+    "homebridge": "^1.8.0 || ^2.0.0-beta.0"
   },
-  "main": "dist/thermostat.js",
+  "main": "dist/index.js",
   "scripts": {
     "lint": "eslint src/**.ts --max-warnings=0",
     "watch": "npm run build && npm link && nodemon",
-    "build": "rimraf ./dist && tsc",
-    "prepublishOnly": "npm run lint && npm run build"
+    "build": "rimraf ./dist && tsc"
   },
   "keywords": [
     "homebridge-plugin"
   ],
   "devDependencies": {
     "@types/node": "^14.14.31",
+    "@types/request": "^2.48.12",
     "@typescript-eslint/eslint-plugin": "^4.16.1",
     "@typescript-eslint/parser": "^4.16.1",
     "eslint": "^7.21.0",
-    "homebridge": "^1.3.1",
+    "homebridge": "^2.0.0-beta.0",
     "nodemon": "^2.0.7",
     "rimraf": "^3.0.2",
     "ts-node": "^9.1.1",
@@ -42,7 +43,8 @@
     "epoll": "^2.0.10",
     "moment": "^2.30.1",
     "node-gyp": "^10.1.0",
-    "redis": "^3.1.2",
+    "redis": "^4.7.0",
+    "request": "^2.88.2",
     "rpio": "^2.4.2"
   }
 }
