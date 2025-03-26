@@ -15,6 +15,11 @@ interface AuthResponse {
   expires_in: number;
 }
 
+enum SensorMode {
+  Local,
+  Remote
+}
+
 /**
  * Platform Accessory
  * An instance of this class is created for each accessory your platform registers
@@ -28,7 +33,7 @@ export class Thermostat {
     CurrentHeatingCoolingState: 0,
     CurrentTemperature: 25,
     HeatingThresholdTemperature: 25,
-    LastOff: moment('0000-01-01', 'YYYY-MM-DD').startOf('year').toString(),
+    LastOff: moment('0000-01-01T00:00:00', moment.ISO_8601).format(),
     TargetHeatingCoolingState: 0,
     TargetTemperature: 25,
     TemperatureDisplayUnits: 0
@@ -39,6 +44,7 @@ export class Thermostat {
   private client = createClient();
   private pin = parseInt(process.env.PIN || '1');
   private sensorID?: string;
+  private sensorMode: SensorMode = SensorMode[process.env.SENSOR_MODE || ''];
   private serialNumber = process.env.SERIAL_NUMBER;
   private tempStep?: number;
   private uniqueId?: string;
@@ -126,15 +132,29 @@ export class Thermostat {
      *
      */
     setInterval(() => {
-      this.getRemoteTemperature();
+      switch(this.sensorMode) {
+        case SensorMode.Remote:
+          this.getRemoteTemperature();
+          break;
+        case SensorMode.Local:
+          // read sensor temperature and set state
+          this.setState({ CurrentTemperature: ds18b20.temperatureSync(this.sensorID) });
 
-      // fallback to local sensor if no uniqueId
-      if (!this.uniqueId) {
-        // read sensor temperature and set state
-        this.setState({ CurrentTemperature: ds18b20.temperatureSync(this.sensorID) });
+          // push the new value to HomeKit
+          this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.CurrentTemperature);
+          break;
+        default:
+          this.getRemoteTemperature();
 
-        // push the new value to HomeKit
-        this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.CurrentTemperature);
+          // fallback to local sensor if no uniqueId
+          if (!this.uniqueId) {
+            // read sensor temperature and set state
+            this.setState({ CurrentTemperature: ds18b20.temperatureSync(this.sensorID) });
+
+            // push the new value to HomeKit
+            this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.CurrentTemperature);
+          }
+          break;
       }
 
       this.platform.log.debug('Thermostat state', {
@@ -252,32 +272,31 @@ export class Thermostat {
   async handleCurrentTemperature(change: CharacteristicChange) {
     this.platform.log.debug(this.handleCurrentTemperature.name, this.formatAsDisplayTemperature(change.newValue));
 
-    const currentTemperature = this.state.CurrentTemperature as number;
+    const currentTemperature = change.newValue as number;
     const targetTemperature = this.state.TargetTemperature as number;
-    const pin = rpio.read(this.pin);
-    let lastOff;
+
+    const rpioRead = rpio.read(this.pin);
+    let rpioWrite = rpioRead;
 
     switch (this.state.TargetHeatingCoolingState) {
       case 0: // Off
-        if (pin) {
-          rpio.write(this.pin, rpio.LOW);
-          lastOff = moment().toString();
+        if (rpioRead) {
+          rpioWrite = rpio.LOW;
         }
         break;
       case 1: // Heating
-        if (pin && (currentTemperature - targetTemperature) >= (3 * 5/9)) {
-          rpio.write(this.pin, rpio.LOW);
-          lastOff = moment().toString();
-        } else if (targetTemperature - currentTemperature >= (1 * 5/9) && !this.compressorDelay()) {
-          rpio.write(this.pin, rpio.HIGH);
+        if (rpioRead && (currentTemperature - targetTemperature) >= (3 * 5/9)) {
+          rpioWrite = rpio.LOW;
+
+        } else if (targetTemperature - currentTemperature >= (1 * 5/9) && !this.compressorDelay) {
+          rpioWrite = rpio.HIGH;
         }
         break;
       case 2: // Cooling
-        if (pin && targetTemperature - currentTemperature >= (2 * 5/9)) {
-          rpio.write(this.pin, rpio.LOW);
-          lastOff = moment().toString();
-        } else if (currentTemperature - targetTemperature >= (1 * 5/9) && !this.compressorDelay()) {
-          rpio.write(this.pin, rpio.HIGH);
+        if (rpioRead && targetTemperature - currentTemperature >= (2 * 5/9)) {
+          rpioWrite = rpio.LOW;
+        } else if (currentTemperature - targetTemperature >= (1 * 5/9) && !this.compressorDelay) {
+          rpioWrite = rpio.HIGH;
         }
         break;
       default: // Auto
@@ -285,9 +304,13 @@ export class Thermostat {
         break;
     }
 
+    if (rpioRead !== rpioWrite) {
+      rpio.write(this.pin, rpioWrite);
+    }
+
     this.setState({
-      CurrentHeatingCoolingState: rpio.read(this.pin) ? 1 : 0,
-      LastOff: lastOff || this.state.LastOff,
+      CurrentHeatingCoolingState: this.state.TargetHeatingCoolingState,
+      LastOff: rpioWrite === rpio.LOW ? moment().format() : this.state.LastOff,
     });
   }
 
