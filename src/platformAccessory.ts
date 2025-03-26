@@ -29,10 +29,10 @@ export class Thermostat {
   private service: Service;
 
   private state = {
-    CoolingThresholdTemperature: 25,
+    // CoolingThresholdTemperature: 25,
     CurrentHeatingCoolingState: 0,
     CurrentTemperature: 25,
-    HeatingThresholdTemperature: 25,
+    // HeatingThresholdTemperature: 25,
     LastOff: moment('0000-01-01T00:00:00', moment.ISO_8601).format(),
     TargetHeatingCoolingState: 0,
     TargetTemperature: 25,
@@ -110,14 +110,14 @@ export class Thermostat {
       .onGet(this.getTargetHeatingCoolingState.bind(this));
 
     // register handlers for the CoolingThresholdTemperature Characteristic
-    this.service.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
-      .onSet(this.setCoolingThresholdTemperature.bind(this))
-      .onGet(this.getCoolingThresholdTemperature.bind(this));
+    // this.service.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
+    //   .onSet(this.setCoolingThresholdTemperature.bind(this))
+    //   .onGet(this.getCoolingThresholdTemperature.bind(this));
 
     // register handlers for the HeatingThresholdTemperature Characteristic
-    this.service.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
-      .onSet(this.setHeatingThresholdTemperature.bind(this))
-      .onGet(this.getHeatingThresholdTemperature.bind(this));
+    // this.service.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
+    //   .onSet(this.setHeatingThresholdTemperature.bind(this))
+    //   .onGet(this.getHeatingThresholdTemperature.bind(this));
 
     // get sensor ID
     this.getSensors();
@@ -158,10 +158,10 @@ export class Thermostat {
       }
 
       this.platform.log.debug('Thermostat state', {
-        CoolingThresholdTemperature: this.formatAsDisplayTemperature(this.state.CoolingThresholdTemperature),
+        // CoolingThresholdTemperature: this.formatAsDisplayTemperature(this.state.CoolingThresholdTemperature),
         CurrentHeatingCoolingState: this.formatCurrentHeatingCoolingState(this.state.CurrentHeatingCoolingState),
         CurrentTemperature:this.formatAsDisplayTemperature(this.state.CurrentTemperature),
-        HeatingThresholdTemperature: this.formatAsDisplayTemperature(this.state.HeatingThresholdTemperature),
+        // HeatingThresholdTemperature: this.formatAsDisplayTemperature(this.state.HeatingThresholdTemperature),
         LastOff: this.state.LastOff,
         TargetHeatingCoolingState: this.formatTargetHeatingCoolingState(this.state.TargetHeatingCoolingState),
         TargetTemperature: this.formatAsDisplayTemperature(this.state.TargetTemperature),
@@ -185,17 +185,17 @@ export class Thermostat {
    * @example
    * this.service.updateCharacteristic(this.platform.Characteristic.On, true)
    */
-  async getCoolingThresholdTemperature(): Promise<CharacteristicValue> {
-    this.platform.log.debug(this.getCoolingThresholdTemperature.name, this.formatAsDisplayTemperature(this.state.CoolingThresholdTemperature));
+  // async getCoolingThresholdTemperature(): Promise<CharacteristicValue> {
+  //   this.platform.log.debug(this.getCoolingThresholdTemperature.name, this.formatAsDisplayTemperature(this.state.CoolingThresholdTemperature));
 
-    // if you need to return an error to show the device as "Not Responding" in the Home app:
-    // throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-
-    return this.unroundTemperature(this.state.CoolingThresholdTemperature);
-  }
+  //   return this.unroundTemperature(this.state.CoolingThresholdTemperature);
+  // }
 
   async getCurrentHeatingCoolingState(): Promise<CharacteristicValue> {
     this.platform.log.debug(this.getCurrentHeatingCoolingState.name, this.formatCurrentHeatingCoolingState(this.state.CurrentHeatingCoolingState));
+
+    // if you need to return an error to show the device as "Not Responding" in the Home app:
+    // throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
 
     return this.state.CurrentHeatingCoolingState;
   }
@@ -206,11 +206,11 @@ export class Thermostat {
     return this.unroundTemperature(this.state.CurrentTemperature);
   }
 
-  async getHeatingThresholdTemperature(): Promise<CharacteristicValue> {
-    this.platform.log.debug(this.getHeatingThresholdTemperature.name, this.formatAsDisplayTemperature(this.state.HeatingThresholdTemperature));
+  // async getHeatingThresholdTemperature(): Promise<CharacteristicValue> {
+  //   this.platform.log.debug(this.getHeatingThresholdTemperature.name, this.formatAsDisplayTemperature(this.state.HeatingThresholdTemperature));
 
-    return this.unroundTemperature(this.state.HeatingThresholdTemperature);
-  }
+  //   return this.unroundTemperature(this.state.HeatingThresholdTemperature);
+  // }
 
   async getTargetHeatingCoolingState(): Promise<CharacteristicValue> {
     this.platform.log.debug(this.getTargetHeatingCoolingState.name, this.formatTargetHeatingCoolingState(this.state.TargetHeatingCoolingState));
@@ -239,17 +239,17 @@ export class Thermostat {
    * Handle "SET" requests from HomeKit
    * These are sent when the user changes the state of an accessory, for example, changing the Brightness
    */
-  async setCoolingThresholdTemperature(value: CharacteristicValue) {
-    this.platform.log.debug(this.setCoolingThresholdTemperature.name, this.formatAsDisplayTemperature(value));
+  // async setCoolingThresholdTemperature(value: CharacteristicValue) {
+  //   this.platform.log.debug(this.setCoolingThresholdTemperature.name, this.formatAsDisplayTemperature(value));
 
-    this.setState({ CoolingThresholdTemperature: value });
-  }
+  //   this.setState({ CoolingThresholdTemperature: value });
+  // }
 
-  async setHeatingThresholdTemperature(value: CharacteristicValue) {
-    this.platform.log.debug(this.setHeatingThresholdTemperature.name, this.formatAsDisplayTemperature(value));
+  // async setHeatingThresholdTemperature(value: CharacteristicValue) {
+  //   this.platform.log.debug(this.setHeatingThresholdTemperature.name, this.formatAsDisplayTemperature(value));
 
-    this.setState({ HeatingThresholdTemperature: value });
-  }
+  //   this.setState({ HeatingThresholdTemperature: value });
+  // }
 
   async setTargetHeatingCoolingState(value: CharacteristicValue) {
     this.platform.log.debug(this.setTargetHeatingCoolingState.name, this.formatTargetHeatingCoolingState(value));
@@ -435,10 +435,10 @@ export class Thermostat {
       if (state) {
         this.platform.log.debug('redisState', state);
         this.setState(JSON.parse(state));
-        this.service.updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, this.state.CoolingThresholdTemperature);
+        // this.service.updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, this.state.CoolingThresholdTemperature);
         this.service.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState, this.state.CurrentHeatingCoolingState);
         this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.CurrentTemperature);
-        this.service.updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, this.state.HeatingThresholdTemperature);
+        // this.service.updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, this.state.HeatingThresholdTemperature);
         this.service.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, this.state.TargetHeatingCoolingState);
         this.service.updateCharacteristic(this.platform.Characteristic.TargetTemperature, this.state.TargetTemperature);
         this.service.updateCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits, this.state.TemperatureDisplayUnits);
@@ -464,10 +464,10 @@ export class Thermostat {
       .setProps({ minStep: this.tempStep, minValue: minGetTemp, maxValue: maxGetTemp });
     this.service.getCharacteristic(this.platform.Characteristic.TargetTemperature)
       .setProps({ minStep: this.tempStep, minValue: minSetTemp, maxValue: maxSetTemp });
-    this.service.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
-      .setProps({ minStep: this.tempStep, minValue: minSetTemp, maxValue: maxSetTemp });
-    this.service.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
-      .setProps({ minStep: this.tempStep, minValue: minSetTemp, maxValue: maxSetTemp });
+    // this.service.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
+    //   .setProps({ minStep: this.tempStep, minValue: minSetTemp, maxValue: maxSetTemp });
+    // this.service.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
+    //   .setProps({ minStep: this.tempStep, minValue: minSetTemp, maxValue: maxSetTemp });
     this.service.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState)
       .setProps({ validValues: [ this.platform.Characteristic.TargetHeatingCoolingState.OFF, this.platform.Characteristic.TargetHeatingCoolingState.HEAT, this.platform.Characteristic.TargetHeatingCoolingState.COOL ]});
   }
