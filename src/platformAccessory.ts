@@ -15,6 +15,16 @@ interface AuthResponse {
   expires_in: number;
 }
 
+interface State {
+  // coolingThresholdTemperature?: number;
+  currentTemperature?: number;
+  // heatingThresholdTemperature?: number;
+  lastOff?: string;
+  targetHeatingCoolingState?: number;
+  targetTemperature?: number;
+  temperatureDisplayUnits?: number;
+}
+
 enum SensorMode {
   Local,
   Remote
@@ -28,15 +38,14 @@ enum SensorMode {
 export class Thermostat {
   private service: Service;
 
-  private state = {
-    // CoolingThresholdTemperature: 25,
-    CurrentHeatingCoolingState: 0,
-    CurrentTemperature: 25,
-    // HeatingThresholdTemperature: 25,
-    LastOff: moment('0000-01-01T00:00:00', moment.ISO_8601).format(),
-    TargetHeatingCoolingState: 0,
-    TargetTemperature: 25,
-    TemperatureDisplayUnits: 0
+  private state: State = {
+    // coolingThresholdTemperature: 25,
+    currentTemperature: 25,
+    // heatingThresholdTemperature: 25,
+    lastOff: moment('0000-01-01T00:00:00', moment.ISO_8601).format(),
+    targetHeatingCoolingState: 0,
+    targetTemperature: 25,
+    temperatureDisplayUnits: 0
   };
 
   private authorization?: AuthResponse;
@@ -82,7 +91,7 @@ export class Thermostat {
       .onGet(this.getTemperatureDisplayUnits.bind(this));
 
     // setup a channel for use as an output
-    this.setupPin(this.pin);
+    this.openPin(this.pin);
 
     // register handlers for the CurrentTemperature Characteristic
     this.service.getCharacteristic(this.platform.Characteristic.CurrentTemperature)
@@ -138,10 +147,10 @@ export class Thermostat {
           break;
         case SensorMode.Local:
           // read sensor temperature and set state
-          this.setState({ CurrentTemperature: ds18b20.temperatureSync(this.sensorID) });
+          this.setState({ currentTemperature: ds18b20.temperatureSync(this.sensorID) });
 
           // push the new value to HomeKit
-          this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.CurrentTemperature);
+          this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.currentTemperature);
           break;
         default:
           this.getRemoteTemperature();
@@ -149,25 +158,25 @@ export class Thermostat {
           // fallback to local sensor if no uniqueId
           if (!this.uniqueId) {
             // read sensor temperature and set state
-            this.setState({ CurrentTemperature: ds18b20.temperatureSync(this.sensorID) });
+            this.setState({ currentTemperature: ds18b20.temperatureSync(this.sensorID) });
 
             // push the new value to HomeKit
-            this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.CurrentTemperature);
+            this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.currentTemperature);
           }
           break;
       }
 
       this.platform.log.debug('Thermostat state', {
-        // CoolingThresholdTemperature: this.formatAsDisplayTemperature(this.state.CoolingThresholdTemperature),
-        CurrentHeatingCoolingState: this.formatCurrentHeatingCoolingState(this.state.CurrentHeatingCoolingState),
-        CurrentTemperature:this.formatAsDisplayTemperature(this.state.CurrentTemperature),
-        // HeatingThresholdTemperature: this.formatAsDisplayTemperature(this.state.HeatingThresholdTemperature),
-        LastOff: this.state.LastOff,
-        TargetHeatingCoolingState: this.formatTargetHeatingCoolingState(this.state.TargetHeatingCoolingState),
-        TargetTemperature: this.formatAsDisplayTemperature(this.state.TargetTemperature),
-        TemperatureDisplayUnits: this.formatTemperatureDisplayUnits(this.state.TemperatureDisplayUnits)
+        // coolingThresholdTemperature: this.formatAsDisplayTemperature(this.state.coolingThresholdTemperature),
+        currentHeatingCoolingState: this.formatCurrentHeatingCoolingState(this.getCurrentHeatingCoolingStateSync()),
+        currentTemperature: this.formatAsDisplayTemperature(this.state.currentTemperature),
+        // heatingThresholdTemperature: this.formatAsDisplayTemperature(this.state.heatingThresholdTemperature),
+        lastOff: this.state.lastOff,
+        targetHeatingCoolingState: this.formatTargetHeatingCoolingState(this.state.targetHeatingCoolingState),
+        targetTemperature: this.formatAsDisplayTemperature(this.state.targetTemperature),
+        temperatureDisplayUnits: this.formatTemperatureDisplayUnits(this.state.temperatureDisplayUnits)
       });
-    }, 60000);
+    }, 10000);
   }
 
   /**
@@ -186,53 +195,98 @@ export class Thermostat {
    * this.service.updateCharacteristic(this.platform.Characteristic.On, true)
    */
   // async getCoolingThresholdTemperature(): Promise<CharacteristicValue> {
-  //   this.platform.log.debug(this.getCoolingThresholdTemperature.name, this.formatAsDisplayTemperature(this.state.CoolingThresholdTemperature));
+  //   this.platform.log.debug(this.getCoolingThresholdTemperature.name, this.formatAsDisplayTemperature(this.state.coolingThresholdTemperature));
 
-  //   return this.unroundTemperature(this.state.CoolingThresholdTemperature);
+  //   return this.unroundTemperature(this.state.coolingThresholdTemperature);
   // }
 
   async getCurrentHeatingCoolingState(): Promise<CharacteristicValue> {
-    this.platform.log.debug(this.getCurrentHeatingCoolingState.name, this.formatCurrentHeatingCoolingState(this.state.CurrentHeatingCoolingState));
+    const getPin = rpio.read(this.pin);
+    let currentHeatingCoolingState;
+
+    switch (getPin) {
+      case rpio.LOW:
+        currentHeatingCoolingState = this.platform.Characteristic.CurrentHeatingCoolingState.OFF;
+        break;
+      case rpio.HIGH:
+        switch (this.state.targetHeatingCoolingState) {
+          case this.platform.Characteristic.TargetHeatingCoolingState.HEAT:
+            currentHeatingCoolingState = this.platform.Characteristic.CurrentHeatingCoolingState.HEAT;
+            break;
+          case this.platform.Characteristic.TargetHeatingCoolingState.COOL:
+            currentHeatingCoolingState = this.platform.Characteristic.CurrentHeatingCoolingState.COOL;
+            break;
+        }
+    }
+
+    this.platform.log.debug(this.getCurrentHeatingCoolingState.name, this.formatCurrentHeatingCoolingState(currentHeatingCoolingState));
 
     // if you need to return an error to show the device as "Not Responding" in the Home app:
     // throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
 
-    return this.state.CurrentHeatingCoolingState;
+    return currentHeatingCoolingState;
+  }
+
+  getCurrentHeatingCoolingStateSync(): Promise<CharacteristicValue> {
+    const getPin = rpio.read(this.pin);
+    let currentHeatingCoolingState;
+
+    switch (getPin) {
+      case rpio.LOW:
+        currentHeatingCoolingState = this.platform.Characteristic.CurrentHeatingCoolingState.OFF;
+        break;
+      case rpio.HIGH:
+        switch (this.state.targetHeatingCoolingState) {
+          case this.platform.Characteristic.TargetHeatingCoolingState.HEAT:
+            currentHeatingCoolingState = this.platform.Characteristic.CurrentHeatingCoolingState.HEAT;
+            break;
+          case this.platform.Characteristic.TargetHeatingCoolingState.COOL:
+            currentHeatingCoolingState = this.platform.Characteristic.CurrentHeatingCoolingState.COOL;
+            break;
+        }
+    }
+
+    this.platform.log.debug(this.getCurrentHeatingCoolingState.name, this.formatCurrentHeatingCoolingState(currentHeatingCoolingState));
+
+    // if you need to return an error to show the device as "Not Responding" in the Home app:
+    // throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+
+    return currentHeatingCoolingState;
   }
 
   async getCurrentTemperature(): Promise<CharacteristicValue> {
     this.platform.log.debug(this.getCurrentTemperature.name, );
 
-    return this.unroundTemperature(this.state.CurrentTemperature);
+    return this.unroundTemperature(this.state.currentTemperature);
   }
 
   // async getHeatingThresholdTemperature(): Promise<CharacteristicValue> {
-  //   this.platform.log.debug(this.getHeatingThresholdTemperature.name, this.formatAsDisplayTemperature(this.state.HeatingThresholdTemperature));
+  //   this.platform.log.debug(this.getHeatingThresholdTemperature.name, this.formatAsDisplayTemperature(this.state.heatingThresholdTemperature));
 
-  //   return this.unroundTemperature(this.state.HeatingThresholdTemperature);
+  //   return this.unroundTemperature(this.state.heatingThresholdTemperature);
   // }
 
   async getTargetHeatingCoolingState(): Promise<CharacteristicValue> {
-    this.platform.log.debug(this.getTargetHeatingCoolingState.name, this.formatTargetHeatingCoolingState(this.state.TargetHeatingCoolingState));
+    this.platform.log.debug(this.getTargetHeatingCoolingState.name, this.formatTargetHeatingCoolingState(this.state.targetHeatingCoolingState));
 
-    return this.state.TargetHeatingCoolingState;
+    return this.state.targetHeatingCoolingState;
   }
 
   async getTargetTemperature(): Promise<CharacteristicValue> {
-    this.platform.log.debug(this.getTargetTemperature.name, this.formatAsDisplayTemperature(this.state.TargetTemperature));
+    this.platform.log.debug(this.getTargetTemperature.name, this.formatAsDisplayTemperature(this.state.targetTemperature));
 
     switch (await this.getTargetHeatingCoolingState()) {
       case this.platform.Characteristic.TargetHeatingCoolingState.OFF:
         return this.getCurrentTemperature();
       default:
-        return this.unroundTemperature(this.state.TargetTemperature);
+        return this.unroundTemperature(this.state.targetTemperature);
     }
   }
 
   async getTemperatureDisplayUnits(): Promise<CharacteristicValue> {
-    this.platform.log.debug(this.getTemperatureDisplayUnits.name, this.formatTemperatureDisplayUnits(this.state.TemperatureDisplayUnits));
+    this.platform.log.debug(this.getTemperatureDisplayUnits.name, this.formatTemperatureDisplayUnits(this.state.temperatureDisplayUnits));
 
-    return this.state.TemperatureDisplayUnits;
+    return this.state.temperatureDisplayUnits;
   }
 
   /**
@@ -254,17 +308,17 @@ export class Thermostat {
   async setTargetHeatingCoolingState(value: CharacteristicValue) {
     this.platform.log.debug(this.setTargetHeatingCoolingState.name, this.formatTargetHeatingCoolingState(value));
 
-    this.setState({ TargetHeatingCoolingState: value });
+    this.setState({ targetHeatingCoolingState: value });
   }
 
   async setTargetTemperature(value: CharacteristicValue) {
-    this.platform.log.debug(this.setTargetTemperature.name, this.formatAsDisplayTemperature(this.state.TargetTemperature));
+    this.platform.log.debug(this.setTargetTemperature.name, this.formatAsDisplayTemperature(this.state.targetTemperature));
 
-    this.setState({ TargetTemperature: value });
+    this.setState({ targetTemperature: value });
   }
 
   async setTemperatureDisplayUnits(value: CharacteristicValue) {
-    this.setState({ TemperatureDisplayUnits: value });
+    this.setState({ temperatureDisplayUnits: value });
 
     this.platform.log.debug(this.setTemperatureDisplayUnits.name, this.formatTemperatureDisplayUnits(value));
   }
@@ -273,30 +327,29 @@ export class Thermostat {
     this.platform.log.debug(this.handleCurrentTemperature.name, this.formatAsDisplayTemperature(change.newValue));
 
     const currentTemperature = change.newValue as number;
-    const targetTemperature = this.state.TargetTemperature as number;
+    const targetTemperature = this.state.targetTemperature as number;
 
-    const rpioRead = rpio.read(this.pin);
-    let rpioWrite;
+    const getPin = rpio.read(this.pin);
+    let setPin;
 
-    switch (this.state.TargetHeatingCoolingState) {
+    switch (this.state.targetHeatingCoolingState) {
       case 0: // Off
-        if (rpioRead) {
-          rpioWrite = rpio.LOW;
+        if (getPin === rpio.HIGH) {
+          setPin = rpio.LOW;
         }
         break;
       case 1: // Heating
-        if (rpioRead && (currentTemperature - targetTemperature) >= (3 * 5/9)) {
-          rpioWrite = rpio.LOW;
-
-        } else if (targetTemperature - currentTemperature >= (1 * 5/9) && !this.compressorDelay) {
-          rpioWrite = rpio.HIGH;
+        if (getPin === rpio.HIGH && (currentTemperature - targetTemperature) >= (3 * 5/9)) {
+          setPin = rpio.LOW;
+        } else if (targetTemperature - currentTemperature >= (1 * 5/9) && !this.compressorDelay()) {
+          setPin = rpio.HIGH;
         }
         break;
       case 2: // Cooling
-        if (rpioRead && targetTemperature - currentTemperature >= (2 * 5/9)) {
-          rpioWrite = rpio.LOW;
-        } else if (currentTemperature - targetTemperature >= (1 * 5/9) && !this.compressorDelay) {
-          rpioWrite = rpio.HIGH;
+        if (getPin === rpio.HIGH && targetTemperature - currentTemperature >= (2 * 5/9)) {
+          setPin = rpio.LOW;
+        } else if (currentTemperature - targetTemperature >= (1 * 5/9) && !this.compressorDelay()) {
+          setPin = rpio.HIGH;
         }
         break;
       default: // Auto
@@ -304,13 +357,12 @@ export class Thermostat {
         break;
     }
 
-    if (rpioWrite !== undefined) {
-      rpio.write(this.pin, rpioWrite);
+    if (setPin !== undefined) {
+      rpio.write(this.pin, setPin);
     }
 
     this.setState({
-      CurrentHeatingCoolingState: this.state.TargetHeatingCoolingState,
-      LastOff: rpioWrite === rpio.LOW ? moment().format() : this.state.LastOff,
+      lastOff: setPin === rpio.LOW ? moment().format() : this.state.lastOff
     });
   }
 
@@ -321,7 +373,7 @@ export class Thermostat {
   compressorDelay() {
     const fourMinutesAgo = moment().subtract(4, 'minutes');
 
-    return moment(this.state.LastOff).isAfter(fourMinutesAgo);
+    return moment(this.state.lastOff).isAfter(fourMinutesAgo);
   }
 
   fahrenheitToCelsius(temperature) {
@@ -435,15 +487,19 @@ export class Thermostat {
       if (state) {
         this.platform.log.debug('redisState', state);
         this.setState(JSON.parse(state));
-        // this.service.updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, this.state.CoolingThresholdTemperature);
-        this.service.updateCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState, this.state.CurrentHeatingCoolingState);
-        this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.CurrentTemperature);
-        // this.service.updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, this.state.HeatingThresholdTemperature);
-        this.service.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, this.state.TargetHeatingCoolingState);
-        this.service.updateCharacteristic(this.platform.Characteristic.TargetTemperature, this.state.TargetTemperature);
-        this.service.updateCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits, this.state.TemperatureDisplayUnits);
+        // this.service.updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, this.state.coolingThresholdTemperature);
+        this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.currentTemperature);
+        // this.service.updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, this.state.heatingThresholdTemperature);
+        this.service.updateCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState, this.state.targetHeatingCoolingState);
+        this.service.updateCharacteristic(this.platform.Characteristic.TargetTemperature, this.state.targetTemperature);
+        this.service.updateCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits, this.state.temperatureDisplayUnits);
       }
     });
+  }
+
+  openPin(pin: number) {
+    rpio.open(pin, rpio.OUTPUT);
+    this.platform.log.debug(`Pin ${pin} is currently ` + (rpio.read(pin) ? 'high' : 'low'));
   }
 
   async setProps() {
@@ -472,18 +528,13 @@ export class Thermostat {
       .setProps({ validValues: [ this.platform.Characteristic.TargetHeatingCoolingState.OFF, this.platform.Characteristic.TargetHeatingCoolingState.HEAT, this.platform.Characteristic.TargetHeatingCoolingState.COOL ]});
   }
 
-  setState(state) {
+  setState(state: State) {
     this.state = { ...this.state, ...state };
     try {
       this.client.set('State', JSON.stringify(this.state));
     } catch(e) {
       this.platform.log.error('Redis write error', e);
     }
-  }
-
-  setupPin(pin: number) {
-    rpio.open(pin, rpio.OUTPUT);
-    this.platform.log.debug(`Pin ${pin} is currently ` + (rpio.read(pin) ? 'high' : 'low'));
   }
 
   async unroundTemperature(value: CharacteristicValue) {
