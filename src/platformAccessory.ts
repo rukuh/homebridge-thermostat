@@ -276,7 +276,7 @@ export class Thermostat {
     const targetTemperature = this.state.TargetTemperature as number;
 
     const rpioRead = rpio.read(this.pin);
-    let rpioWrite = rpioRead;
+    let rpioWrite;
 
     switch (this.state.TargetHeatingCoolingState) {
       case 0: // Off
@@ -304,7 +304,7 @@ export class Thermostat {
         break;
     }
 
-    if (rpioRead !== rpioWrite) {
+    if (rpioWrite !== undefined) {
       rpio.write(this.pin, rpioWrite);
     }
 
