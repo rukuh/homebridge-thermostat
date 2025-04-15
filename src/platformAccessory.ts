@@ -135,13 +135,31 @@ export class Thermostat {
      *
      */
     setInterval(() => {
-      const currentTemperature = this.getRemoteTemperature() || ds18b20.temperatureSync(this.sensorID);
+      let currentTemperature;
 
-      // read sensor temperature and set state
-      this.setState({ currentTemperature });
+      try {
+        currentTemperature = this.getRemoteTemperature();
 
-      // push the new value to HomeKit
-      this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.currentTemperature);
+        if (!currentTemperature) {
+          currentTemperature = ds18b20.temperatureSync(this.sensorID);
+        }
+
+        // read sensor temperature and set state
+        this.setState({ currentTemperature });
+
+        // push the new value to HomeKit
+        this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.currentTemperature);
+      } catch (e) {
+        let message;
+
+        if (typeof e === "string") {
+          message = e.toUpperCase();
+        } else if (e instanceof Error) {
+          message = e.message // works, `e` narrowed to Error
+        }
+
+        this.platform.log(message);
+      }
 
       this.platform.log.debug('Thermostat state', {
         // coolingThresholdTemperature: this.formatAsDisplayTemperature(this.state.coolingThresholdTemperature),
@@ -153,7 +171,7 @@ export class Thermostat {
         targetTemperature: this.formatAsDisplayTemperature(this.state.targetTemperature),
         temperatureDisplayUnits: this.formatTemperatureDisplayUnits(this.state.temperatureDisplayUnits)
       });
-    }, 10000);
+    }, 30000);
   }
 
   /**
