@@ -5,6 +5,7 @@ import { createClient } from 'redis';
 import * as request from 'request';
 import { promisify } from 'util';
 import type { RaspberryPi } from './platform';
+const _ = require('lodash');
 const packageJson = require('../package.json');
 const rpio = require('rpio');
 promisify(ds18b20.sensors);
@@ -48,9 +49,8 @@ export class Thermostat {
   private client = createClient();
   private pin = parseInt(process.env.PIN || '1');
   private sensorID?: string;
-  private serialNumber = process.env.SERIAL_NUMBER;
+  private serialNumbers = process.env.SERIAL_NUMBERS?.split(',') || [];
   private tempStep?: number;
-  private uniqueId?: string;
 
   constructor(
     private readonly platform: RaspberryPi,
@@ -135,33 +135,25 @@ export class Thermostat {
      *
      */
     setInterval(() => {
-      let currentTemperature;
-
       try {
-        currentTemperature = this.getRemoteTemperature();
-
-        if (!currentTemperature) {
-          currentTemperature = ds18b20.temperatureSync(this.sensorID);
-        }
-
         // read sensor temperature and set state
-        this.setState({ currentTemperature });
+        this.setState({ currentTemperature: _.mean([...this.getRemoteTemperatures(), ds18b20.temperatureSync(this.sensorID)]) });
 
         // push the new value to HomeKit
         this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.state.currentTemperature);
       } catch (e) {
         let message;
 
-        if (typeof e === "string") {
+        if (typeof e === 'string') {
           message = e.toUpperCase();
         } else if (e instanceof Error) {
-          message = e.message // works, `e` narrowed to Error
+          message = e.message; // works, `e` narrowed to Error
         }
 
         this.platform.log(message);
       }
 
-      this.platform.log.debug('Thermostat state', {
+      this.platform.log.info('Thermostat state', {
         // coolingThresholdTemperature: this.formatAsDisplayTemperature(this.state.coolingThresholdTemperature),
         currentHeatingCoolingState: this.formatCurrentHeatingCoolingState(this.getCurrentHeatingCoolingStateSync()),
         currentTemperature: this.formatAsDisplayTemperature(this.state.currentTemperature),
@@ -196,7 +188,7 @@ export class Thermostat {
   // }
 
   async getCurrentHeatingCoolingState(): Promise<CharacteristicValue> {
-    const getPin = rpio.read(this.pin);
+    const getPin = this.readPin(this.pin);
     let currentHeatingCoolingState;
 
     switch (getPin) {
@@ -223,7 +215,7 @@ export class Thermostat {
   }
 
   getCurrentHeatingCoolingStateSync(): CharacteristicValue {
-    const getPin = rpio.read(this.pin);
+    const getPin = this.readPin(this.pin);
     let currentHeatingCoolingState;
 
     switch (getPin) {
@@ -324,7 +316,7 @@ export class Thermostat {
     const currentTemperature = change.newValue as number;
     const targetTemperature = this.state.targetTemperature as number;
 
-    const getPin = rpio.read(this.pin);
+    const getPin = this.readPin(this.pin);
     let setPin;
 
     switch (this.state.targetHeatingCoolingState) {
@@ -353,7 +345,7 @@ export class Thermostat {
     }
 
     if (setPin !== undefined) {
-      rpio.write(this.pin, setPin);
+      this.writePin(this.pin, setPin);
     }
 
     this.setState({
@@ -427,38 +419,29 @@ export class Thermostat {
     });
   }
 
-  getRemoteTemperature() {
-    let temperatureSensor;
+  getRemoteTemperatures() {
+    const remoteTemperatures: string[] = [];
 
     const options = {
       url: `${this.baseUrl}/api/accessories`,
       auth: { bearer: this.authorization?.access_token }
     };
 
-    if (this.uniqueId) {
-      options.url += `/${this.uniqueId}`;
-    }
-
     request.get(options, (err, res, body) => {
       if (err) {
         this.platform.log.error(err);
       }
 
-      this.platform.log.debug(`Status: ${res.statusCode}`, body);
-
-      if (this.uniqueId) {
-        temperatureSensor = JSON.parse(body);
-      } else {
-        temperatureSensor = JSON.parse(body).find((accessory) => {
-          return accessory.accessoryInformation['Serial Number'] === this.serialNumber;
-        });
-        if (temperatureSensor) {
-          this.uniqueId = temperatureSensor.uniqueId;
+      for (const accessory of JSON.parse(body)) {
+        if (this.serialNumbers.includes(accessory.accessoryInformation['Serial Number'])) {
+          remoteTemperatures.push(accessory.values.CurrentTemperature);
         }
       }
+
+      this.platform.log.debug(this.getRemoteTemperatures.name, remoteTemperatures);
     });
 
-    return temperatureSensor?.values.CurrentTemperature;
+    return remoteTemperatures;
   }
 
   getSensors() {
@@ -488,7 +471,19 @@ export class Thermostat {
 
   openPin(pin: number) {
     rpio.open(pin, rpio.OUTPUT);
-    this.platform.log.debug(`Pin ${pin} is currently ` + (rpio.read(pin) ? 'high' : 'low'));
+    this.platform.log.debug(`Pin ${pin} is currently ${rpio.read(pin) ? 'high' : 'low'}`);
+  }
+
+  readPin(pin: number) {
+    const rPin = rpio.read(pin);
+    this.platform.log.debug(`Read pin ${pin}, value is ${rPin ? 'high' : 'low'}`);
+
+    return rPin;
+  }
+
+  writePin(pin: number, value: number) {
+    rpio.write(pin, value);
+    this.platform.log.debug(`Write pin ${pin}, set to ${value ? 'high' : 'low'}`);
   }
 
   async setProps() {
